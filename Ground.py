@@ -1,8 +1,7 @@
 
 '''
-Get the texture features
+Opencv ground area detection
 '''
-
 
 from __future__ import print_function
 
@@ -11,7 +10,7 @@ import cv2
 
 cam = cv2.VideoCapture(1)
 
-#return the values of stds in different regions
+#return the values of standard deviations of brightness in different regions
 def std_bri(img,step,h,w,y,x):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     bri=np.zeros(shape=(len(y),len(x)))
@@ -24,7 +23,8 @@ def std_bri(img,step,h,w,y,x):
                 #img = cv2.rectangle(img,(x[j]-step/2,y[i]-step/2),(x[j]+step/2,y[i]+step/2),(0,255,0),3)
     return bri
 
-def std_color(img,step,h,w,y,x):
+#return the values of standard deviations and average of color in different regions
+def color(img,step,h,w,y,x):
     b,g,r=cv2.split(img)
     color_b=np.zeros(shape=(len(y),len(x)))
     color_g=np.zeros(shape=(len(y),len(x)))
@@ -47,6 +47,7 @@ def std_color(img,step,h,w,y,x):
                 #img = cv2.rectangle(img,(x[j]-step/2,y[i]-step/2),(x[j]+step/2,y[i]+step/2),(0,0,255),3)
     return color_std,color_avg
 
+#return the optical flow of different regions
 def OPflow(previmg):
     prevgray = cv2.cvtColor(previmg, cv2.COLOR_BGR2GRAY)
     cap=input('press 1 if the camera is oriented properly')
@@ -59,6 +60,8 @@ def OPflow(previmg):
 '''homography induced similarity'''
 def Homo():
 
+
+
 i=0
 while i<1:
 
@@ -68,9 +71,10 @@ while i<1:
     y, x = np.mgrid[step/2:h:step, step/2:w:step].reshape(2,-1).astype(int)
 
     bri=std_bri(img,step,h,w,y,x)
-    color_std,color_avg=std_color(img,step,h,w,y,x)
+    color_std,color_avg=color(img,step,h,w,y,x)
     flow=OPflow(img)
 
+    #pixels in the lower middle part of the image represent the ground
     g_cri_bri=(bri[len(y)-1][len(x)/2-1]+bri[len(y)-1][len(x)/2-2]+bri[len(y)-1][len(x)/2]+
                bri[len(y)-2][len(x)/2-1]+bri[len(y)-2][len(x)/2-2]+bri[len(y)-2][len(x)/2])/6
     g_cri_cstd=(color_std[len(y)-1][len(x)/2-1]+color_std[len(y)-1][len(x)/2-2]+color_std[len(y)-1][len(x)/2]+
@@ -80,6 +84,8 @@ while i<1:
     g_cri_flow=(flow[len(y)-1][len(x)/2-1][0]+flow[len(y)-1][len(x)/2-2][0]+flow[len(y)-1][len(x)/2][0]+
                 flow[len(y)-2][len(x)/2-1][0]+flow[len(y)-2][len(x)/2-2][0]+flow[len(y)-2][len(x)/2][0])/6
     print(g_cri_flow)
+
+    #compare, decide and draw the ground regions
     for i in range(len(y)):
         for j in range(len(x)):
             '''weighted method...'''
