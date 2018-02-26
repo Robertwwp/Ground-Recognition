@@ -61,44 +61,63 @@ def OPflow(previmg):
     return flow
 
 #find the correspondening point
-def find_corr(y,x,prev):
+def find_corr(y,x,prev,img):
     bp,gp,rp = cv2.split(prev)
+    b,g,r = cv2.split(img)
 
+    corr=np.zeros((5,2),dtype=np.float32)
+    for index in range(len(y)):
+        pix_b=float(bp[y[index]][x[index]])
+        pix_g=float(gp[y[index]][x[index]])
+        pix_r=float(rp[y[index]][x[index]])
+
+        corr_sum_i=0
+        corr_sum_j=0
+        corr_count=0
+        for i in range(16):
+            for j in range(16):
+                #turn the camera to the right
+                a=abs(float(b[y[index]+i][x[index]-j])-pix_b)+abs(float(g[y[index]+i][x[index]-j])-pix_g)+abs(float(r[y[index]+i][x[index]-j])-pix_r)
+                if a<5:
+                        corr_sum_i=corr_sum_i+i
+                        corr_sum_j=corr_sum_j+j
+                        corr_count=corr_count+1
+        if corr_count!=0:
+            corr[index][0]=y[index]+int(corr_sum_i/corr_count)
+            corr[index][1]=x[index]-int(corr_sum_j/corr_count)
+            cv2.circle(img, (corr[index][1], corr[index][0]), 1, (0, 255, 0), 2)
+        else:
+            '''need to be dealt with'''
+            print('failed to find a match')
+            corr[index]=[y[index],x[index]]
+    return corr,img
+
+
+'''homography induced similarity'''
+'''find corespondences/ for each region? for edges? for the whole image?'''
+def Homography(y,x,step,prev):
     #change to robot's camera motion later
     cap=input('press 1 if the camera is oriented properly')
     if cap==1:
         cam = cv2.VideoCapture(1)
         ret, img = cam.read()
-        b,g,r = cv2.split(img)
 
-        for index in range(len(y)):
-            pix_b=float(bp[y[index]][x[index]])
-            pix_g=float(gp[y[index]][x[index]])
-            pix_r=float(rp[y[index]][x[index]])
+        Homo=np.zeros((len(y),len(x),9),dtype=np.float32)
+        '''missing the outer parts'''
+        for i in range(1,len(y)-1):
+            for j in range(1,len(x)-1):
+                x_c=[x[j]-step/2,x[j],x[j],x[j],x[j]+step/2]
+                y_c=[y[i],y[i]-step/2,y[i],y[i]+step/2,y[i]]
+                src_pts=np.zeros((5,2),dtype=np.float32)
+                for a in range(5):
+                    src_pts[a][0]=y_c[a]
+                    src_pts[a][1]=x_c[a]
+                dst_pts,img=find_corr(y_c,x_c,prev,img)
+                H, status = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 3.0)
+                Homo[i][j]=np.reshape(H,9)
 
-            corr=np.zeros(shape=(32,32))
-            corr_sum_i=0
-            corr_sum_j=0
-            corr_count=0
-            for i in range(32):
-                for j in range(32):
-                    #turn the camera to the right
-                    corr[i][j]=abs(float(b[y[index]+i][x[index]-j])-pix_b)+abs(float(g[y[index]+i][x[index]-j])-pix_g)+abs(float(r[y[index]+i][x[index]-j])-pix_r)
-                    if corr[i][j]<10:
-                            corr_sum_i=corr_sum_i+i
-                            corr_sum_j=corr_sum_j+j
-                            corr_count=corr_count+1
-            corr_i=y[index]+int(corr_sum_i/corr_count)
-            corr_j=x[index]-int(corr_sum_j/corr_count)
-            cv2.circle(img, (corr_j, corr_i), 1, (0, 255, 0), 2)
-        return corr,img
-    else:
-        return None
+    return Homo,img
 
-
-'''homography induced similarity'''
-#def Homo():
-'''find corespondences/ for each region? for edges? for the whole image?'''
 
 
 
@@ -108,14 +127,15 @@ while i<1:
     ret, img = cam.read()
     step=32;
     h,w=img.shape[:2]
-    y, x = np.mgrid[step/2:h:step, step/2:w:step].reshape(2,-1).astype(int)
+    y=np.linspace(step/2,h-step/2,15,dtype=int)
+    x=np.linspace(step/2,w-step/2,20,dtype=int)
 
     bri=std_bri(img,step,h,w,y,x)
     color_std,color_avg=color(img,step,h,w,y,x)
     cam.release()
-    y_c=[240,240,272,272]
-    x_c=[320,352,320,352]
-    corr, img=find_corr(y_c,x_c,img)
+    Homo,img=Homography(y,x,step,img)
+    print(Homo)
+    '''need to test the match and find implement the homography criterion'''
     #flow=OPflow(img)
 
     #pixels in the lower middle part of the image represent the ground
