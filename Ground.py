@@ -1,4 +1,3 @@
-
 '''
 Opencv ground area detection
 '''
@@ -11,6 +10,7 @@ import cv2
 cam = cv2.VideoCapture(1)
 
 #return the values of standard deviations of brightness in different regions
+#maybe add average
 def std_bri(img,step,h,w,y,x):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     bri=np.zeros(shape=(len(y),len(x)))
@@ -65,20 +65,23 @@ def find_corr(y,x,prev,img):
     bp,gp,rp = cv2.split(prev)
     b,g,r = cv2.split(img)
 
-    corr=np.zeros((5,2),dtype=np.float32)
+    corr=np.zeros((len(y),2),dtype=np.float32)
+    f=0
     for index in range(len(y)):
-        pix_b=float(bp[y[index]][x[index]])
-        pix_g=float(gp[y[index]][x[index]])
-        pix_r=float(rp[y[index]][x[index]])
+        pix_b_mat=bp[y[index]-1:y[index]+1,x[index]-1:x[index]+1]
+        pix_g_mat=gp[y[index]-1:y[index]+1,x[index]-1:x[index]+1]
+        pix_r_mat=rp[y[index]-1:y[index]+1,x[index]-1:x[index]+1]
 
         corr_sum_i=0
         corr_sum_j=0
         corr_count=0
-        for i in range(16):
-            for j in range(16):
+        for i in range(8):
+            for j in range(8):
                 #turn the camera to the right
-                a=abs(float(b[y[index]+i][x[index]-j])-pix_b)+abs(float(g[y[index]+i][x[index]-j])-pix_g)+abs(float(r[y[index]+i][x[index]-j])-pix_r)
-                if a<5:
+                a=np.sum(abs(np.add(b[y[index]+i-1:y[index]+i+1,x[index]-j-1:x[index]-j+1],-pix_b_mat))
+                 +abs(np.add(g[y[index]+i-1:y[index]+i+1,x[index]-j-1:x[index]-j+1],-pix_g_mat))
+                 +abs(np.add(r[y[index]+i-1:y[index]+i+1,x[index]-j-1:x[index]-j+1],-pix_r_mat)))
+                if a<15:
                         corr_sum_i=corr_sum_i+i
                         corr_sum_j=corr_sum_j+j
                         corr_count=corr_count+1
@@ -86,11 +89,12 @@ def find_corr(y,x,prev,img):
             corr[index][0]=y[index]+int(corr_sum_i/corr_count)
             corr[index][1]=x[index]-int(corr_sum_j/corr_count)
             cv2.circle(img, (corr[index][1], corr[index][0]), 1, (0, 255, 0), 2)
-        else:
-            '''need to be dealt with'''
-            print('failed to find a match')
-            corr[index]=[y[index],x[index]]
-    return corr,img
+            f=f+1
+    if f>=4:
+        f=1
+    else:
+        f=0
+    return corr,img,f
 
 
 '''homography induced similarity'''
@@ -106,45 +110,46 @@ def Homography(y,x,step,prev):
         '''missing the outer parts'''
         for i in range(1,len(y)-1):
             for j in range(1,len(x)-1):
-                x_c=[x[j]-step/2,x[j],x[j],x[j],x[j]+step/2]
-                y_c=[y[i],y[i]-step/2,y[i],y[i]+step/2,y[i]]
-                src_pts=np.zeros((5,2),dtype=np.float32)
-                for a in range(5):
+                x_c,y_c=np.mgrid[x[j]-step/2:x[j]+step/2:step/4, y[i]-step/2:y[i]+step/2:step/4].reshape(2,-1).astype(int)
+                #x_c=[x[j]-step/2,x[j],x[j],x[j],x[j]+step/2]
+                #y_c=[y[i],y[i]-step/2,y[i],y[i]+step/2,y[i]]
+                src_pts=np.zeros((len(x_c),2),dtype=np.float32)
+                for a in range(len(x_c)):
                     src_pts[a][0]=y_c[a]
                     src_pts[a][1]=x_c[a]
-                dst_pts,img=find_corr(y_c,x_c,prev,img)
-                H, status = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 3.0)
-                Homo[i][j]=np.reshape(H,9)
+                dst_pts,img,f=find_corr(y_c,x_c,prev,img)
+                if f==1:
+                    H, status = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 3.0)
+                    #print(H)
+                    if H is not None:
+                        Homo[i][j]=np.reshape(H,9)
 
     return Homo,img
-
-
-
 
 i=0
 while i<1:
 
     ret, img = cam.read()
-    step=32;
+    step=16;
     h,w=img.shape[:2]
-    y=np.linspace(step/2,h-step/2,15,dtype=int)
-    x=np.linspace(step/2,w-step/2,20,dtype=int)
+    y=np.linspace(step/2,h-step/2,int((h-step)/step),dtype=int)
+    x=np.linspace(step/2,w-step/2,int((w-step)/step),dtype=int)
 
     bri=std_bri(img,step,h,w,y,x)
     color_std,color_avg=color(img,step,h,w,y,x)
     cam.release()
     Homo,img=Homography(y,x,step,img)
-    print(Homo)
+    #print(Homo)
     '''need to test the match and find implement the homography criterion'''
     #flow=OPflow(img)
 
     #pixels in the lower middle part of the image represent the ground
-    g_cri_bri=(bri[len(y)-1][len(x)/2-1]+bri[len(y)-1][len(x)/2-2]+bri[len(y)-1][len(x)/2]+
-               bri[len(y)-2][len(x)/2-1]+bri[len(y)-2][len(x)/2-2]+bri[len(y)-2][len(x)/2])/6
-    g_cri_cstd=(color_std[len(y)-1][len(x)/2-1]+color_std[len(y)-1][len(x)/2-2]+color_std[len(y)-1][len(x)/2]+
-                color_std[len(y)-2][len(x)/2-1]+color_std[len(y)-2][len(x)/2-2]+color_std[len(y)-2][len(x)/2])/6
-    g_cri_cavg=(color_avg[len(y)-1][len(x)/2-1]+color_avg[len(y)-1][len(x)/2-2]+color_avg[len(y)-1][len(x)/2]+
-                color_avg[len(y)-2][len(x)/2-1]+color_avg[len(y)-2][len(x)/2-2]+color_avg[len(y)-2][len(x)/2])/6
+    #print(bri)
+    g_cri_bri=np.sum(bri[len(y)-4:len(y)-1,len(x)/2-1:len(x)/2+2])/9
+    g_cri_cstd=np.sum(color_std[len(y)-4:len(y)-1,len(x)/2-1:len(x)/2+2])/9
+    g_cri_cavg=np.sum(color_avg[len(y)-4:len(y)-1,len(x)/2-1:len(x)/2+2])/9
+    #g_cri_homo=sum(Homo[len(y)-5:len(y)-1,len(x)/2-3:len(x)/2+1])/16
+    #print(Homo[len(y)-5:len(y)-1,len(x)/2-3:len(x)/2+1])
     '''g_cri_flow=(flow[len(y)-1][len(x)/2-1][0]+flow[len(y)-1][len(x)/2-2][0]+flow[len(y)-1][len(x)/2][0]+
                 flow[len(y)-2][len(x)/2-1][0]+flow[len(y)-2][len(x)/2-2][0]+flow[len(y)-2][len(x)/2][0])/6
     print(g_cri_flow)'''
@@ -153,7 +158,7 @@ while i<1:
     for i in range(len(y)):
         for j in range(len(x)):
             '''weighted method...optical flow has less impact for the pixels far away,can be used just for simple test'''
-            if abs(bri[i][j]-g_cri_bri) + abs(color_std[i][j]-g_cri_cstd) +abs(color_avg[i][j]-g_cri_cavg)<80:
+            if abs(bri[i][j]-g_cri_bri)<50 and abs(color_std[i][j]-g_cri_cstd)<20 and abs(color_avg[i][j]-g_cri_cavg)<60:
                 #and abs(flow[i][j][0]-g_cri_flow)<0.8:
             #if color_flag[i][j]==1 and bri_flag[i][j]==1:
                 img = cv2.rectangle(img,(x[j]-step/2,y[i]-step/2),(x[j]+step/2,y[i]+step/2),(0,0,255),3)
