@@ -4,11 +4,27 @@ Opencv ground area detection
 '''
 
 from __future__ import print_function
-
 import numpy as np
 import cv2
+import time
 
-cam = cv2.VideoCapture(1)
+#np.set_printoptions(threshold=np.inf)
+
+H_R = np.array([[ 1.10587804e+00, -6.43249198e-02, -1.84515951e+02],
+                [ 2.89657049e-02,  1.06138065e+00, -2.79427738e+01],
+                [ 1.40568837e-04,  1.54480500e-05,  1.00000000e+00]],dtype=np.float32)
+
+H_L = np.array([[ 8.41595347e-01,  7.80677915e-02,  2.81009575e+02],
+                [-3.83048857e-02,  9.50095266e-01,  3.37983703e+01],
+                [-2.01290838e-04, -4.32323499e-05,  1.00000000e+00]],dtype=np.float32)
+
+H_B = np.array([[ 1.03942196e+00,  1.42230512e-01, -2.25065316e+01],
+                [ 5.13076092e-04,  1.10165364e+00, -1.02445581e+01],
+                [-2.50237564e-05,  4.08002281e-04,  1.00000000e+00]],dtype=np.float32)
+
+H_BB = np.array([[ 9.98412114e-01, -1.91174655e-01, -2.33504844e+01],
+                [ 1.06039618e-02,  9.06643631e-01, -2.01838585e+00],
+                [ 6.56247635e-05, -3.90300252e-04,  1.00000000e+00]],dtype=np.float32)
 
 #return the values of standard deviations of brightness in different regions
 #maybe add average
@@ -32,6 +48,7 @@ def color(img,step,h,w,y,x):
     color_bstd=np.zeros(shape=(len(y),len(x)))
     color_gstd=np.zeros(shape=(len(y),len(x)))
     color_rstd=np.zeros(shape=(len(y),len(x)))
+    color_std=np.zeros(shape=(len(y),len(x)))
     color_bavg=np.zeros(shape=(len(y),len(x)))
     color_gavg=np.zeros(shape=(len(y),len(x)))
     color_ravg=np.zeros(shape=(len(y),len(x)))
@@ -42,13 +59,14 @@ def color(img,step,h,w,y,x):
             color_bstd[i][j]=np.std(b[y[i]-step/2:y[i]+step/2,x[j]-step/2:x[j]+step/2])
             color_gstd[i][j]=np.std(g[y[i]-step/2:y[i]+step/2,x[j]-step/2:x[j]+step/2])
             color_rstd[i][j]=np.std(r[y[i]-step/2:y[i]+step/2,x[j]-step/2:x[j]+step/2])
+            color_std[i][j]=color_bstd[i][j]+color_gstd[i][j]+color_rstd[i][j]
             color_bavg[i][j]=np.mean(b[y[i]-step/2:y[i]+step/2,x[j]-step/2:x[j]+step/2])
             color_gavg[i][j]=np.mean(g[y[i]-step/2:y[i]+step/2,x[j]-step/2:x[j]+step/2])
             color_ravg[i][j]=np.mean(r[y[i]-step/2:y[i]+step/2,x[j]-step/2:x[j]+step/2])
             #if color_b[i][j]+color_g[i][j]+color_r[i][j]>100:
                 #color_flag[i][j]=1
                 #img = cv2.rectangle(img,(x[j]-step/2,y[i]-step/2),(x[j]+step/2,y[i]+step/2),(0,0,255),3)
-    return color_bstd,color_gstd,color_rstd,color_bavg,color_gavg,color_ravg
+    return color_std,color_bavg,color_gavg,color_ravg
 
 #return the optical flow of different regions
 def OPflow(previmg):
@@ -63,111 +81,195 @@ def OPflow(previmg):
         cam.release()
     return flow
 
-#find the correspondening point
-def find_corr(y,x,prev,img):
-    bp,gp,rp = cv2.split(prev)
-    b,g,r = cv2.split(img)
+'''online ground homography calculation'''
+'''get better homography value!!!'''
+'''to get the precise focal length later'''
+def findGH(img1,img2,LRBB):
 
-    corr=np.zeros((len(y),2),dtype=np.float32)
-    f=0
-    for index in range(len(y)):
-        pix_b_mat=bp[y[index]-1:y[index]+1,x[index]-1:x[index]+1]
-        pix_g_mat=gp[y[index]-1:y[index]+1,x[index]-1:x[index]+1]
-        pix_r_mat=rp[y[index]-1:y[index]+1,x[index]-1:x[index]+1]
+    img1 = cv2.cvtColor(img1,cv2.COLOR_BGR2GRAY)
+    img2 = cv2.cvtColor(img2,cv2.COLOR_BGR2GRAY)
+    img1[0:270,0:640]=np.zeros((270,640),dtype=np.uint8)
+    img2[0:270,0:640]=np.zeros((270,640),dtype=np.uint8)
 
-        corr_sum_i=0
-        corr_sum_j=0
-        corr_count=0
+    MIN_MATCH_COUNT = 10
 
-        '''maybe larger correspondence check range'''
-        for i in range(16):
-            for j in range(16):
-                #turn the camera to the right
-                a=np.sum(abs(np.add(b[y[index]+i-1:y[index]+i+1,x[index]-j-1:x[index]-j+1],-pix_b_mat))
-                 +abs(np.add(g[y[index]+i-1:y[index]+i+1,x[index]-j-1:x[index]-j+1],-pix_g_mat))
-                 +abs(np.add(r[y[index]+i-1:y[index]+i+1,x[index]-j-1:x[index]-j+1],-pix_r_mat)))
-                if a<30:
-                        corr_sum_i=corr_sum_i+i
-                        corr_sum_j=corr_sum_j+j
-                        corr_count=corr_count+1
-        if corr_count!=0:
-            corr[index][0]=y[index]+int(corr_sum_i/corr_count)
-            corr[index][1]=x[index]-int(corr_sum_j/corr_count)
-            cv2.circle(img, (corr[index][1], corr[index][0]), 1, (0, 255, 0), 2)
-            f=f+1
-    if f>=4:
-        f=1
+    # Initiate SIFT detector
+    sift = cv2.xfeatures2d.SIFT_create()
+
+    # find the keypoints and descriptors with SIFT
+    kp1, des1 = sift.detectAndCompute(img1,None)
+    kp2, des2 = sift.detectAndCompute(img2,None)
+
+    FLANN_INDEX_KDTREE = 0
+    index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
+    search_params = dict(checks = 50)
+
+    flann = cv2.FlannBasedMatcher(index_params, search_params)
+
+    matches = flann.knnMatch(des1,des2,k=2)
+
+    # store all the good matches as per Lowe's ratio test.
+    good = []
+    for m,n in matches:
+        if m.distance < 0.7*n.distance:
+            good.append(m)
+
+    if len(good)>MIN_MATCH_COUNT:
+        src_pts = np.float32([ kp1[m.queryIdx].pt for m in good ]).reshape(-1,1,2)
+        dst_pts = np.float32([ kp2[m.trainIdx].pt for m in good ]).reshape(-1,1,2)
+
+        H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,5.0)
+        print(H)
+
     else:
-        f=0
-    return corr,img,f
+        if LRBB==0:
+            H=H_L
+        elif LRBB==1:
+            H=H_R
+        elif LRBB==2:
+            H=H_B
+        else:
+            H=H_BB
+        print("Not enough matches are found - %d/%d" % (len(good),MIN_MATCH_COUNT))
+        matchesMask = None
 
+    return H
 
-'''homography induced similarity'''
-'''find corespondences/ for each region? for edges? for the whole image?'''
-def Homography(y,x,step,prev):
+def Homography(h,w,prev,imgL,imgR,imgB,imgBB,Ground_truth):
     #change to robot's camera motion later
-    cap=input('press 1 if the camera is oriented properly')
-    if cap==1:
-        cam = cv2.VideoCapture(1)
-        ret, img = cam.read()
+    bp,gp,rp = cv2.split(prev)
+    bl,gl,rl = cv2.split(imgL)
+    br,gr,rr = cv2.split(imgR)
+    bb,gb,rb = cv2.split(imgB)
+    bbb,gbb,rbb = cv2.split(imgBB)
 
-        Homo=np.zeros((len(y),len(x),9),dtype=np.float32)
-        '''missing the outer parts'''
-        for i in range(1,len(y)-1):
-            for j in range(1,len(x)-1):
-                x_c,y_c=np.mgrid[x[j]-step/2:x[j]+step/2:step/4, y[i]-step/2:y[i]+step/2:step/4].reshape(2,-1).astype(int)
-                src_pts=np.zeros((len(x_c),2),dtype=np.float32)
-                for a in range(len(x_c)):
-                    src_pts[a][0]=y_c[a]
-                    src_pts[a][1]=x_c[a]
-                dst_pts,img,f=find_corr(y_c,x_c,prev,img)
-                if f==1:
-                    H, status = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 3.0)
-                    #print(H)
-                    if H is not None:
-                        Homo[i][j]=np.reshape(H,9)
+    #print(H_L)
+    #print(H_R)
+    for i in range(w):
+        for j in range(h):
+            spt=np.float32([[i,j]]).reshape(-1,1,2)
+            dptL=cv2.perspectiveTransform(spt,H_L)
+            dptL=np.int32(dptL)
+            dptR=cv2.perspectiveTransform(spt,H_R)
+            dptR=np.int32(dptR)
+            dptB=cv2.perspectiveTransform(spt,H_B)
+            dptB=np.int32(dptB)
+            dptBB=cv2.perspectiveTransform(spt,H_BB)
+            dptBB=np.int32(dptBB)
 
-    return Homo,img
+            '''better filters needed, std,brightness,etc.'''
+            if dptL[0][0][0] in range(w) and dptL[0][0][1] in range(h):
+                if (abs(bl[dptL[0][0][1]][dptL[0][0][0]]-bp[j][i])<=15 and
+                    abs(gl[dptL[0][0][1]][dptL[0][0][0]]-gp[j][i])<=15 and
+                    abs(rl[dptL[0][0][1]][dptL[0][0][0]]-rp[j][i])<=15):
+                    prev[j][i]=[0,255,0]
+                    imgL[j][i]=[0,255,0]
+                    Ground_truth[j][i]=1
+            if dptR[0][0][0] in range(w) and dptR[0][0][1] in range(h):
+                if (abs(br[dptR[0][0][1]][dptR[0][0][0]]-bp[j][i])<=15 and
+                    abs(gr[dptR[0][0][1]][dptR[0][0][0]]-gp[j][i])<=15 and
+                    abs(rr[dptR[0][0][1]][dptR[0][0][0]]-rp[j][i])<=15):
+                    prev[j][i]=[0,255,0]
+                    imgR[j][i]=[0,255,0]
+                    Ground_truth[j][i]=1
+            if dptB[0][0][0] in range(w) and dptB[0][0][1] in range(h):
+                if (abs(bb[dptB[0][0][1]][dptB[0][0][0]]-bp[j][i])<=15 and
+                    abs(gb[dptB[0][0][1]][dptB[0][0][0]]-gp[j][i])<=15 and
+                    abs(rb[dptB[0][0][1]][dptB[0][0][0]]-rp[j][i])<=15):
+                    prev[j][i]=[0,255,0]
+                    imgB[j][i]=[0,255,0]
+                    Ground_truth[j][i]=1
+            if dptBB[0][0][0] in range(w) and dptBB[0][0][1] in range(h):
+                if (abs(bbb[dptBB[0][0][1]][dptBB[0][0][0]]-bp[j][i])<=15 and
+                    abs(gbb[dptBB[0][0][1]][dptBB[0][0][0]]-bp[j][i])<=15 and
+                    abs(rbb[dptBB[0][0][1]][dptBB[0][0][0]]-rp[j][i])<=15):
+                    prev[j][i]=[0,255,0]
+                    imgBB[j][i]=[0,255,0]
+                    Ground_truth[j][i]=1
+
+    for n in range(6):
+        for i in range(1,w-1):
+            for j in range(1,h-1):
+                if (Ground_truth[j][i]==0 and
+                   np.sum(Ground_truth[j-1:j+2,i-1:i+2])>=4):
+                   Ground_truth[j][i]==1
+                   prev[j][i]=[0,255,0]
+
+
+    return prev,imgL,imgR,imgB,imgBB,Ground_truth
+
 
 i=0
 while i<1:
 
-    ret, img = cam.read()
+    #initiate the two images
+    cam = cv2.VideoCapture(0)
+    n=0
+    while n<10:
+        ret, prev = cam.read()
+        n=n+1
+
+    capR=input('press 1 if the camera is oriented right properly')
+    if capR==1:
+        while 1:
+            ret, imgR = cam.read()
+            cv2.imshow('imgR',imgR)
+            if cv2.waitKey(5) & 0xFF == ord('q'):
+                break
+        cv2.destroyAllWindows()
+    capL=input('press 1 if the camera is oriented left properly')
+    if capL==1:
+        while 1:
+            ret, imgL = cam.read()
+            cv2.imshow('imgL',imgL)
+            if cv2.waitKey(5) & 0xFF == ord('q'):
+                break
+        cv2.destroyAllWindows()
+    capB=input('press 1 if the camera is moved back properly')
+    if capB==1:
+        while 1:
+            ret, imgB = cam.read()
+            cv2.imshow('imgB',imgB)
+            if cv2.waitKey(5) & 0xFF == ord('q'):
+                break
+        cv2.destroyAllWindows()
+    capBB=input('press 1 if the camera is moved further back properly')
+    if capBB==1:
+        while 1:
+            ret, imgBB = cam.read()
+            cv2.imshow('imgBB',imgBB)
+            if cv2.waitKey(5) & 0xFF == ord('q'):
+                break
+        cv2.destroyAllWindows()
+
+
     step=16;
-    h,w=img.shape[:2]
+    h,w=prev.shape[:2]
+    Ground_truth=np.zeros(shape=(h,w))
     y=np.linspace(step/2,h-step/2,int((h-step)/step),dtype=int)
     x=np.linspace(step/2,w-step/2,int((w-step)/step),dtype=int)
 
-    bri_std,bri_mean=bri(img,step,h,w,y,x)
-    color_bstd,color_gstd,color_rstd,color_bavg,color_gavg,color_ravg=color(img,step,h,w,y,x)
-    cam.release()
-    Homo,img2=Homography(y,x,step,img)
-    #print(Homo)
-    '''need to test the match and find implement the homography criterion'''
-    #flow=OPflow(img)
+    bri_std,bri_mean=bri(prev,step,h,w,y,x)
+    color_std,color_bavg,color_gavg,color_ravg=color(prev,step,h,w,y,x)
+
+    H_L = findGH(prev,imgL,0)
+    H_R = findGH(prev,imgR,1)
+    H_B = findGH(prev,imgB,2)
+    H_BB = findGH(prev,imgBB,3)
+    prev,imgL,imgR,imgB,imgBB,Ground_truth=Homography(h,w,prev,imgL,imgR,imgB,imgBB,Ground_truth)
+
+    '''need to group pixels based on continuaty'''
+    '''need to deal with the featureless regions that are not ground'''
 
     #pixels in the lower middle part of the image represent the ground
     #print(bri)
     g_cri_bstd=np.sum(bri_std[len(y)-4:len(y)-1,len(x)/2-1:len(x)/2+2])/9
     g_cri_bavg=np.sum(bri_mean[len(y)-4:len(y)-1,len(x)/2-1:len(x)/2+2])/9
-    g_cri_cbstd=np.sum(color_bstd[len(y)-4:len(y)-1,len(x)/2-1:len(x)/2+2])/9
-    g_cri_cgstd=np.sum(color_gstd[len(y)-4:len(y)-1,len(x)/2-1:len(x)/2+2])/9
-    g_cri_crstd=np.sum(color_rstd[len(y)-4:len(y)-1,len(x)/2-1:len(x)/2+2])/9
+    g_cri_cstd=np.sum(color_std[len(y)-4:len(y)-1,len(x)/2-1:len(x)/2+2])/9
     g_cri_cbavg=np.sum(color_bavg[len(y)-4:len(y)-1,len(x)/2-1:len(x)/2+2])/9
     g_cri_cgavg=np.sum(color_gavg[len(y)-4:len(y)-1,len(x)/2-1:len(x)/2+2])/9
     g_cri_cravg=np.sum(color_ravg[len(y)-4:len(y)-1,len(x)/2-1:len(x)/2+2])/9
 
-    '''get more representitive ground homography'''
-    g_cri_homo=np.zeros(9)
-    count=0
-    for m in range(-5,-2):
-        for n in range(-1,2):
-            if np.sum(Homo[len(y)+m][len(x)/2+n])!=0:
-                g_cri_homo=sum(g_cri_homo,Homo[len(y)+m][len(x)/2+n])
-                count=count+1
-    print(count)
-    g_cri_homo=g_cri_homo/count
-    print(g_cri_homo)
 
     #g_cri_homo=sum(Homo[len(y)-5:len(y)-1,len(x)/2-3:len(x)/2+1])/16
     #print(Homo[len(y)-5:len(y)-1,len(x)/2-3:len(x)/2+1])
@@ -176,25 +278,29 @@ while i<1:
     print(g_cri_flow)'''
 
     #compare, decide and draw the ground regions
-    for i in range(len(y)):
+    '''for i in range(len(y)):
         for j in range(len(x)):
-            '''find bettter method to check homography similarity'''
-            if np.sum(Homo[i][j])!=0 and np.sum(np.add(Homo[i][j],-g_cri_homo))<0.01:
-                img2 = cv2.rectangle(img2,(x[j]-step/2,y[i]-step/2),(x[j]+step/2,y[i]+step/2),(0,0,255),3)
-            '''weighted method...optical flow has less impact for the pixels far away,can be used just for simple test'''
+            #weighted method...optical flow has less impact for the pixels far away,can be used just for simple test
             if (abs(bri_std[i][j]-g_cri_bstd)<50 and abs(bri_mean[i][j]-g_cri_bavg)<50
-                and abs(color_bstd[i][j]-g_cri_cbstd)<15 and abs(color_bavg[i][j]-g_cri_cbavg)<20
-                and abs(color_gstd[i][j]-g_cri_cgstd)<15 and abs(color_gavg[i][j]-g_cri_cgavg)<20
-                and abs(color_rstd[i][j]-g_cri_crstd)<15 and abs(color_ravg[i][j]-g_cri_cravg)<20):
+                and abs(color_std[i][j]-g_cri_cstd)<50 and abs(color_bavg[i][j]-g_cri_cbavg)<50
+                and abs(color_gavg[i][j]-g_cri_cgavg)<50 and abs(color_ravg[i][j]-g_cri_cravg)<50):
                 #and abs(flow[i][j][0]-g_cri_flow)<0.8:
             #if color_flag[i][j]==1 and bri_flag[i][j]==1:
-                img = cv2.rectangle(img,(x[j]-step/2,y[i]-step/2),(x[j]+step/2,y[i]+step/2),(0,0,255),3)
-    cv2.imshow('image1',img)
-    cv2.imshow('image2',img2)
+                prev = cv2.rectangle(prev,(x[j]-step/2,y[i]-step/2),(x[j]+step/2,y[i]+step/2),(0,0,255),3)'''
+    cv2.imshow('prev',prev)
+    cv2.imshow('imgL',imgL)
+    cv2.imshow('imgR',imgR)
+    cv2.imshow('imgB',imgB)
+    cv2.imshow('imgBB',imgBB)
+    cv2.imwrite('prev.jpg',prev)
+    cv2.imwrite('imgL.jpg',imgL)
+    cv2.imwrite('imgR.jpg',imgR)
+    cv2.imwrite('imgB.jpg',imgB)
+    cv2.imwrite('imgBB.jpg',imgBB)
 
     i=i+1
     if cv2.waitKey(0) & 0xFF == ord('q'):
         break
 
-#cam.release()
+cam.release()
 cv2.destroyAllWindows()
