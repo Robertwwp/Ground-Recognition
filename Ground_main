@@ -1,0 +1,438 @@
+from __future__ import print_function
+import numpy as np
+import maxflow as mf
+from sklearn.calibration import CalibratedClassifierCV
+import cv2,glob,math,os.path,re,time
+from skimage.segmentation import slic
+from sklearn.externals import joblib
+from sklearn.preprocessing import normalize
+from sklearn import linear_model
+from sklearn import mixture
+
+np.set_printoptions(threshold=np.inf)
+
+'''more features and more testings (large ground area) with error messages'''
+
+step=8
+
+testimg=cv2.imread('pictures/test/362.jpg')
+testimg=cv2.resize(testimg,(640,480))
+b,g,r=cv2.split(testimg)
+h,w=480,640
+X=np.zeros(shape=(h,w,5))
+for m in range(h):
+    for n in range(w):
+        X[m][n][0]=b[m][n]/255.0
+        X[m][n][1]=g[m][n]/255.0
+        X[m][n][2]=r[m][n]/255.0
+        X[m][n][3]=m/float(h)
+        X[m][n][4]=n/float(w)
+
+segments_test=slic(testimg, n_segments=300, compactness=15, sigma=8)
+num_suppix_test=int(np.amax(segments_test))+1
+
+'''better filters'''
+filters = []
+ksize = step*2
+for theta in np.arange(0, np.pi, np.pi / 6):
+    kern = cv2.getGaborKernel((ksize, ksize), 4.0, theta, 10.0, 0.5, 0, ktype=cv2.CV_32F)
+    kern /= 1.5*kern.sum()
+    filters.append(kern)
+kszie = step*4
+for theta in np.arange(0, np.pi, np.pi / 6):
+    kern = cv2.getGaborKernel((ksize, ksize), 4.0, theta, 10.0, 0.5, 0, ktype=cv2.CV_32F)
+    kern /= 1.5*kern.sum()
+    filters.append(kern)
+
+def testpre():
+
+    h,w=testimg.shape[:2]
+    hsvimg = cv2.cvtColor(testimg, cv2.COLOR_BGR2HSV)
+
+    bavg=np.zeros(num_suppix_test)[:,np.newaxis]
+    gavg=np.zeros(num_suppix_test)[:,np.newaxis]
+    ravg=np.zeros(num_suppix_test)[:,np.newaxis]
+    havg=np.zeros(num_suppix_test)[:,np.newaxis]
+    savg=np.zeros(num_suppix_test)[:,np.newaxis]
+    vavg=np.zeros(num_suppix_test)[:,np.newaxis]
+    img=cv2.cvtColor(testimg, cv2.COLOR_BGR2GRAY)
+    hist5=np.zeros(shape=(num_suppix_test,6))
+    hist3=np.zeros(shape=(num_suppix_test,4))
+    filavg=np.zeros(shape=(num_suppix_test,15))
+    X=np.zeros(shape=(num_suppix_test,1))
+    Y=np.zeros(shape=(num_suppix_test,1))
+    X10=np.zeros(shape=(num_suppix_test,1))
+    Y10=np.zeros(shape=(num_suppix_test,1))
+    X50=np.zeros(shape=(num_suppix_test,1))
+    Y50=np.zeros(shape=(num_suppix_test,1))
+    X90=np.zeros(shape=(num_suppix_test,1))
+    Y90=np.zeros(shape=(num_suppix_test,1))
+    area=np.zeros(shape=(num_suppix_test,1))
+    devi=np.zeros(shape=(num_suppix_test,1))
+
+    for i in range(num_suppix_test):
+        list=[np.where(segments_test == i)]
+        norm1=len(list[0][0])
+        norm2=len(list[0][0])*(math.log(len(list[0][0])))
+        area[i]=len(list[0][0])/float((h*w)/150)
+        devi[i]=(((np.amax(list[0][0])-np.amin(list[0][0]))
+                -(np.amax(list[0][1])-np.amin(list[0][1])))/32.0)
+        X[i]=np.mean(list[0][1])/float(w)
+        Y[i]=np.mean(list[0][0])/float(h)
+        X10[i]=list[0][1][int(0.1*len(list[0][0]))]/float(w)
+        Y10[i]=list[0][0][int(0.1*len(list[0][1]))]/float(h)
+        X50[i]=list[0][1][int(0.5*len(list[0][0]))]/float(w)
+        Y50[i]=list[0][0][int(0.5*len(list[0][1]))]/float(h)
+        X90[i]=list[0][1][int(0.9*len(list[0][0]))]/float(w)
+        Y90[i]=list[0][0][int(0.9*len(list[0][1]))]/float(h)
+
+        bavg[i]=np.sum(np.sum([testimg[idx] for idx in list],axis=0),axis=0)[0]/len(list[0][0])
+        gavg[i]=np.sum(np.sum([testimg[idx] for idx in list],axis=0),axis=0)[1]/len(list[0][0])
+        ravg[i]=np.sum(np.sum([testimg[idx] for idx in list],axis=0),axis=0)[2]/len(list[0][0])
+        bavg[i],gavg[i],ravg[i]=bavg[i]/255.0,gavg[i]/255.0,ravg[i]/255.0
+        BGR_test=np.append(np.append(bavg,gavg,1),ravg,1)
+
+        havg[i]=np.sum(np.sum([hsvimg[idx] for idx in list],axis=0),axis=0)[0]/len(list[0][0])
+        savg[i]=np.sum(np.sum([hsvimg[idx] for idx in list],axis=0),axis=0)[1]/len(list[0][0])
+        vavg[i]=np.sum(np.sum([hsvimg[idx] for idx in list],axis=0),axis=0)[2]/len(list[0][0])
+        havg[i],savg[i],vavg[i]=havg[i]/255.0,savg[i]/255.0,vavg[i]/255.0
+        HSV_test=np.append(np.append(havg,savg,1),vavg,1)
+
+        mask = np.zeros(img.shape[:2], np.uint8)
+        for idx in range(len(list[0][0])):
+            mask[list[0][0][idx]][list[0][1][idx]] = 255
+        hist5[i][:5] = cv2.calcHist([img],[0],mask,[5],[0,256]).reshape(1,5)
+        hist3[i][:3] = cv2.calcHist([img],[0],mask,[3],[0,256]).reshape(1,3)
+        entropy5=0
+        entropy3=0
+        for z in range(5):
+            if hist5[i][z]!=0:
+                entropy5+=-hist5[i][z]*(math.log(hist5[i][z]))/float(norm2)
+            hist5[i][z]=hist5[i][z]/float(norm1)
+        for z in range(3):
+            if hist3[i][z]!=0:
+                entropy3+=-hist3[i][z]*(math.log(hist3[i][z]))/float(norm2)
+            hist3[i][z]=hist3[i][z]/float(norm1)
+        hist5[i][5] = entropy5
+        hist3[i][3] = entropy3
+
+        for f in range(len(filters)):
+            fimg = cv2.filter2D(img, cv2.CV_8UC3, filters[f])
+            filavg[i][f]=np.sum(np.sum([fimg[idx] for idx in list],axis=0),axis=0)/len(list[0][0])
+            filavg[i][f]=filavg[i][f]/255.0
+
+    for p in range(num_suppix_test):
+        filavg[p][12]=np.mean(filavg[p][:12])
+        filavg[p][13]=max(filavg[p][:12])
+        filavg[p][14]=filavg[p][13]-np.median(filavg[p][:12])
+
+    Pos=np.append(np.append(np.append(np.append(np.append(np.append(
+        np.append(X,Y,1),X10,1),Y10,1),X50,1),Y50,1),X90,1),Y90,1)
+    Shape=np.append(area,devi,1)
+
+    test=np.float32(np.append(np.append(np.append(np.append(np.append(
+                     np.append(BGR_test,HSV_test,1),hist5,1),hist3,1),filavg,1),
+                     Pos,1),Shape,1))
+
+    return test,Pos
+
+def ml(test):
+
+    clf_cali = joblib.load('clf_cali.pkl')
+    Wascore=clf_cali.predict_proba(test)[:,1]
+
+    print('ml complete')
+    return Wascore
+
+def KDE(f_X):
+    f_X=f_X.reshape(num_suppix_test*4,2)
+    print('f_X ready')
+
+    kde = joblib.load('KDE.pkl')
+    print('kde model ready')
+
+    f_kde=np.exp(kde.score_samples(f_X))
+    f_kde=f_kde.reshape(num_suppix_test,4)
+    for m in range(4):
+        f_kde[:,m]=f_kde[:,m]/(max(f_kde[:,m])-min(f_kde[:,m]))
+
+    Wb_score=np.sum(f_kde,axis=1)/4.0
+
+    print('KDE complete')
+    return Wb_score
+
+def Geo(testimg):
+
+    gray = cv2.cvtColor(testimg,cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray,50,150,apertureSize = 3)
+
+    #get straight lines
+    votes,i=100,0
+    while i<=20:
+        lines = cv2.HoughLinesP(edges,rho=1,theta=np.pi/180,threshold=votes,minLineLength=70,maxLineGap=50)
+        if len(lines)>=400:
+            votes+=10
+        elif len(lines)<=100:
+            votes-=10
+        else:
+            break
+        i+=1
+
+    #classify straight lines
+    sum_y,count,flag=0,0,0
+    slines_temp,slines=np.zeros(shape=(1,3)),np.zeros(shape=(1,3))
+    for n in range(len(lines)):
+        for x1,y1,x2,y2 in lines[n]:
+
+            if y1==y2:
+                theta=math.pi/2.0
+            elif x1==x2:
+                theta=0
+            else:
+                theta=math.atan(abs(x1-x2)/float(abs(y1-y2)))
+
+            if theta>=math.radians(0) and theta<math.radians(5):
+                if y1<=y2:
+                    slines_temp[0][0]=math.sqrt((x1-x2)**2+(y1-y2)**2)
+                    slines_temp[0][1]=x2
+                    slines_temp[0][2]=y2
+                    if flag==0:
+                        slines=slines_temp
+                        flag=1
+                    else:
+                        slines=np.append(slines,slines_temp,0)
+                else:
+                    slines_temp[0][0]=math.sqrt((x1-x2)**2+(y1-y2)**2)
+                    slines_temp[0][1],slines_temp[0][2]=x1,y1
+                    if flag==0:
+                        slines=slines_temp
+                        flag=1
+                    else:
+                        slines=np.append(slines,slines_temp,0)
+            elif theta>=math.radians(20) and theta<math.radians(65):
+                sum_y+=(y1+y2)/2
+                count+=1
+
+    #filter the lines
+    if count!=0:
+        avg_y=sum_y/count
+    else:
+        avg_y=240
+
+    max_Lx,max_Ly,min_Rx,min_Ry,m=0,h,w,h,0
+    vertices=np.zeros(shape=(1,2))
+    while 1:
+        if m==len(slines):
+            break
+        if slines[m][2]>avg_y and slines[m][2]-avg_y>=slines[m][2]/8:
+            if slines[m][2]>h-20:
+                if slines[m][1]<w/2-50:
+                    if slines[m][1]>max_Lx:
+                        max_Lx,max_Ly=slines[m][1],slines[m][2]
+                        slines=np.delete(slines,m,0)
+                        m-=1
+                elif slines[m][1]>w/2+50:
+                    if slines[m][1]<min_Rx:
+                        min_Rx,min_Ry=slines[m][1],slines[m][2]
+                        slines=np.delete(slines,m,0)
+                        m-=1
+        else:
+            slines=np.delete(slines,m,0)
+            m-=1
+        m+=1
+
+    vertices=np.delete(slines,0,1)
+    p=0
+    while 1:
+        if p==len(vertices):
+            break
+        if vertices[p][0]<=max_Lx or vertices[p][0]>=min_Rx:
+            vertices=np.delete(vertices,p,0)
+            p-=1
+
+        p+=1
+
+    #sorting
+    ind = np.lexsort((vertices[:,1],vertices[:,0]))
+    vertices=vertices[ind]
+
+    vertices=np.int32(np.append(np.append([max_Lx,max_Ly],vertices),[min_Rx,min_Ry]))
+    vertices=vertices.reshape(len(vertices)/2,2)
+    #print(vertices)
+
+    if len(vertices)<=4:
+        vertices=np.int32(np.array([[max_Lx,max_Ly],[max_Lx,avg_y],[min_Rx,avg_y],[min_Rx,min_Ry]]))
+
+    #get mask
+    cv2.fillConvexPoly(gray,vertices,[0])
+    ret2,maskgray = cv2.threshold(gray,0,255,cv2.THRESH_BINARY)
+
+    #calculate probability
+    Wc_score=np.zeros(num_suppix_test)
+    for q in range(num_suppix_test):
+        list=[np.where(segments_test == q)]
+        Wc_score[q]=1-np.sum(np.sum([maskgray[idx] for idx in list],axis=0))/float((len(list[0][0])*255))
+
+    print('Geo complete')
+    return Wc_score
+
+def drawmask_O(score,img):
+    overlay=img.copy()
+    img2=img.copy()
+    flag=0
+    for i in range(num_suppix_test):
+        if score[i]>=0.5:
+            list=[np.where(segments_test == i)]
+            if flag==0:
+                listG=[[list[0][0]],[list[0][1]]]
+                flag=1
+            else:
+                listG[0]=np.append(listG[0],list[0][0])
+                listG[1]=np.append(listG[1],list[0][1])
+            for idx in range(len(list[0][0])):
+                overlay[list[0][0][idx]][list[0][1][idx]] = [0,255,0]
+
+    alpha=0.3
+    cv2.addWeighted(overlay,alpha,img2,1-alpha,0,img2)
+
+    return listG,img2
+
+def drawmask(mask,img):
+    overlay,img2=img.copy(),img.copy()
+    list=[np.where(mask==1)]
+    for idx in range(len(list[0][0])):
+        overlay[list[0][0][idx]][list[0][1][idx]] = [0,255,0]
+    alpha=0.3
+    cv2.addWeighted(overlay,alpha,img2,1-alpha,0,img2)
+    cv2.imshow('img',img2)
+    if cv2.waitKey(0) & 0xFF == ord('q'):
+        cv2.destroyAllWindows()
+
+    return None
+
+'''need better output'''
+def GMM(listG,X,b,g,r):
+
+    #start = time.clock()
+    XG=np.zeros(shape=(len(listG[0]),5))
+    X_gmm=X.reshape(h*w,5)
+    for i in range(len(listG[0])):
+        XG[i][0]=b[listG[0][i]][listG[1][i]]/255.0
+        XG[i][1]=g[listG[0][i]][listG[1][i]]/255.0
+        XG[i][2]=r[listG[0][i]][listG[1][i]]/255.0
+        XG[i][3]=listG[0][i]/float(h)
+        XG[i][4]=listG[1][i]/float(w)
+
+    gmm=mixture.GaussianMixture(n_components=5).fit(XG)
+    gmmprob=gmm.score_samples(X_gmm).reshape(h,w)
+    '''for j in range(50):
+        pct1,pct2=np.percentile(gmmprob,2*j),np.percentile(gmmprob,2*j+2)
+        listP=np.where((gmmprob>=pct1) & (gmmprob<=pct2))
+        for p in range(len(listP[0])):
+            gmmprob[listP[0][p]][listP[1][p]]=j'''
+
+    '''mask = np.ones((h,w),np.uint8)*2
+    #mask = np.zeros(testimg.shape[:2],np.uint8)
+    list=np.where(gmmprob>=0.84)
+    for n in range(len(list[0])):
+        mask[list[0][n]][list[1][n]]=3
+    #scores=np.exp(gmm.score_samples(X))
+    #gmmprob=(scores/(max(scores)-min(scores))).reshape(h,w)
+
+    #elapsed = time.clock()
+    #elapsed = elapsed - start
+    #print("Time spent in GMM is: ", elapsed)'''
+
+    return gmmprob
+
+def Cut(gmmprob,X,k):
+
+    g = mf.Graph[float]()
+    #k=k*math.exp(0.5)
+
+    nodeids = g.add_grid_nodes((h,w))
+    #edges up/down
+    weightsUD,weightsLR=np.zeros((h,w)),np.zeros((h,w))
+    for m in range(h):
+        for n in range(w):
+            if m==0:
+                weightsUD[m][n]=np.inf
+            else:
+                UD=math.sqrt((X[m-1][n][0]-X[m][n][0])**2+
+                             (X[m-1][n][1]-X[m][n][1])**2+
+                             (X[m-1][n][2]-X[m][n][2])**2)
+                if UD==0: weightsUD[m][n]=np.inf
+                else: weightsUD[m][n]=k/(UD*math.exp(2*UD))
+            if n==0:
+                weightsLR[m][n]=np.inf
+            else:
+                LR=math.sqrt((X[m][n-1][0]-X[m][n][0])**2+
+                             (X[m][n-1][1]-X[m][n][1])**2+
+                             (X[m][n-1][2]-X[m][n][2])**2)
+                if LR==0: weightsUD[m][n]=np.inf
+                else: weightsLR[m][n]=k/(LR*math.exp(2*LR))
+
+    structure = np.zeros((3,3))
+    structure[0,1]=1
+    g.add_grid_edges(nodeids, structure=structure, weights=weightsUD, symmetric=True)
+    structure[0,1],structure[1,0]=0,1
+    g.add_grid_edges(nodeids, structure=structure, weights=weightsLR, symmetric=True)
+
+    g.add_grid_tedges(nodeids,gmmprob,1-gmmprob)
+    g.maxflow()
+    sgm=g.get_grid_segments(nodeids)
+    mask=np.int_(np.logical_not(sgm))
+    listG=np.where(mask==1)
+
+    return mask,listG
+
+#def depth():
+
+if __name__ == '__main__':
+
+    start = time.clock()
+    test, f_X=testpre()
+    Wa,Wb,Wc=0.37,0.29,0.34
+    Wa_score,Wb_score,Wc_score=ml(test),KDE(f_X),Geo(testimg)
+    score=Wa*Wa_score+Wb*Wb_score+Wc*Wc_score
+    elapsed = time.clock()
+    elapsed = elapsed - start
+    print("Time spent in generic estimation is: ", elapsed)
+    listG,imgO=drawmask_O(score,testimg)
+    #np.savez('listG262.npz',listG=listG)
+
+    cv2.imshow('img',imgO)
+    if cv2.waitKey(0) & 0xFF == ord('q'):
+        cv2.destroyAllWindows()
+
+    '''with np.load('listG.npz') as data:
+        listG = data['listG']'''
+
+    start = time.clock()
+
+    '''position continous!!!!'''
+    itera=3
+    for n in range(itera):
+        gmmprob=GMM(listG,X,b,g,r)
+        #drawmask(np.remainder(mask,2),testimg)
+        mask,listG=Cut(gmmprob,X,50)
+        if len(listG[0])==0:
+            print('failed to cut')
+            listG=np.where(gmmprob>=np.percentile(gmmprob,90))
+            if n==itera-1:
+                mask = np.ones((h,w),np.uint8)*2
+                for m in range(len(listG[0])):
+                    mask[listG[0][m]][listG[1][m]]=3
+                rect = (0,0,480,640)
+                bgdModel,fgdModel=np.zeros((1,65),np.float64),np.zeros((1,65),np.float64)
+                cv2.grabCut(testimg,mask,rect,bgdModel,fgdModel,1,cv2.GC_INIT_WITH_MASK)
+                mask=np.where((mask==2)|(mask==0),0,1).astype('uint8')
+
+
+    elapsed = time.clock()
+    elapsed = elapsed - start
+    print("Time spent in grabcut is: ", elapsed)
+    #prob_MRF=MRF(prob,X)
+    '''need to change about possile BG and defi BG'''
+    #mask=np.where((mask==2)|(mask==0),0,1).astype('uint8')
+    drawmask(mask,testimg)
