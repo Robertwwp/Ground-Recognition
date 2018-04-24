@@ -18,9 +18,10 @@ plt.xlim(0,100),plt.ylim(0,100)
 #plt.scatter([1,1],[1,2])
 axis=plt.gca()
 
-box_size=4
+box_size=6
 StartM,GoalM1,GoalM2,obsM1=[(0,0),box_size,box_size],[(68,68),box_size,box_size],\
                            [(78,38),box_size,box_size],[(20,20),20,40]
+GMset,Gset_full=[GoalM1,GoalM2],['g1','g2']
 for p in [
         patches.Rectangle(StartM[0],StartM[1],StartM[2],facecolor="red"),
         patches.Rectangle(GoalM1[0],GoalM1[1],GoalM1[2],facecolor="green"),
@@ -53,23 +54,29 @@ def check_obsv(x,y):
 
     return obs,g1,g2
 
-#def check_goal():
+def check_goals(state):
+
+    Gset,obs=[],0
+    for neighbor in g.neighbors(state):
+        if neighbor!=cur_state:
+            trans=g[state][neighbor][0]['guard']
+            for n in range(len(Gset_full)):
+                exec("%s = %d" % (Gset_full[n],1))
+                if eval(trans):
+                    Gset.insert(len(Gset),GMset[n])
+                exec("%s = %d" % (Gset_full[n],0))
+
+    return Gset
+
 
 
 #ltl constraints
 parser = ltl2ba.Parser()
-f = '[] !obs && []<> g1 && []<> g2'
+f = '[]<> g1 && []<> g2 && [] !obs'
 out = ltl2ba.call_ltl2ba(f)
 print(out)
 symbols, g, initial, accepting = parser.parse(out)
 states=g.nodes()
-print(g.neighbors(states[0]))
-#print(g[states[1]][states[2]][0]['guard'])
-obs,g1,g2,g3=0,1,0,0
-trans=g[states[1]][states[2]][0]['guard']
-print(trans)
-if eval(trans):print('true')
-else: print('false')
 
 
 '''get observations and check state change'''
@@ -78,23 +85,54 @@ else: print('false')
 #A* searching
 #################################################
 #velocity m/s, sampling time, scale on map
-'''v,t,scale=0.5,0.2,10
+v,t,scale=0.5,0.2,10
 
 #start,Goal=[0,0],[70,70]
 #px,py=next_move(start,Goal,grid)
-rx,ry,pose,m=2,2,0,0  #pose is the head dir wrt x axis
-T,cur_state=200,states[0]   #simulation ticks, time=T*t
+rx,ry,pose,m,flag=2,2,0,0,0  #pose is the head dir wrt x axis
+T,cur_state=100,'T0_init'   #simulation ticks, time=T*t
 for m in range(T):
     obs,g1,g2=check_obsv(rx,ry)
-    #update state
-    for neighbor in g.neighbors(cur_state) if neighbor!=cur_state:
-        trans=g[cur_state][neighbor][0]['guard']
-        if eval(trans):
-            cur_state=neighbor
+    #first step
+    if flag==0:
+        Gset=check_goals(cur_state)
+        distance,Goal=0,None
+        for i in range(len(Gset)):
+            xG,yG=Gset[i][0][0],Gset[i][0][1]
+            if abs(xG-rx)+abs(yG-ry)>distance:
+                distance=abs(xG-rx)+abs(yG-ry)
+                Goal=Gset[i][0]
+        if Goal==None:
+            print('no more goals')
+            break
+        else:
+            px,py=next_move((int(rx),int(ry)),Goal,grid)
+            #plt.plot(px,py)
+            flag=1
+    else:
+    #check state
+        for neighbor in g.neighbors(cur_state):
+            if neighbor!=cur_state:
+                trans=g[cur_state][neighbor][0]['guard']
+                if eval(trans):
+                    cur_state=neighbor
+                    Gset=check_goals(cur_state)
+                    distance,Goal=0,None
+                    for i in range(len(Gset)):
+                        xG,yG=Gset[i][0][0],Gset[i][0][1]
+                        if abs(xG-rx)+abs(yG-ry)>distance:
+                            distance=abs(xG-rx)+abs(yG-ry)
+                            Goal=Gset[i][0]
+                    if Goal==None:
+                        print('no more goals')
+                        break
+                    else:
+                        print('state change')
+                        print(cur_state)
+                        px,py=next_move((int(rx),int(ry)),Goal,grid)
+                        #plt.plot(px,py)
 
-
-    if 68<=rx<=72 and 68<=ry<=72:  #should be slightly larger than the actual area
-        break
+    #get trajectory based on kinematics
     for n in range(45):
         theta=((n*2+(-45))/180.0)*np.pi
         rx_,ry_=rx+scale*t*v*np.cos(pose+theta),ry+scale*t*v*np.sin(pose+theta)
@@ -108,7 +146,6 @@ for m in range(T):
     if m==0: rx_full,ry_full=rx_,ry_
     else: rx_full,ry_full=np.append(rx_full,rx),np.append(ry_full,ry)
 
-plt.plot(px,py)
 plt.plot(rx_full,ry_full,'orange')
 
-plt.show()'''
+plt.show()
