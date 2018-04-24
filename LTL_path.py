@@ -12,6 +12,31 @@ from Astar import next_move
 import networkx as nx
 import numpy as np
 
+def intersection(line1, line2):
+    xdiff = (line1[0][0] - line1[1][0], line2[0][0] - line2[1][0])
+    ydiff = (line1[0][1] - line1[1][1], line2[0][1] - line2[1][1]) #Typo was here
+
+    def det(a, b):
+        return a[0] * b[1] - a[1] * b[0]
+
+    div = det(xdiff, ydiff)
+    if div == 0:
+       raise Exception('lines do not intersect')
+
+    d = (det(*line1), det(*line2))
+    x = det(d, xdiff) / div
+    y = det(d, ydiff) / div
+    return x, y
+
+def above_below(point,line):
+
+    v1 = (point[0]-line[0][0], point[1]-line[0][1])  # Vector 1
+    v2 = (point[0]-line[1][0], point[1]-line[1][1])   # Vector 1
+    xp = v1[0]*v2[1] - v1[1]*v2[0]  # Cross product
+    if xp >= 0:
+        print('on one side')
+    elif xp < 0:
+        print('on the other')
 
 #Define the map and get grid map for A*
 plt.xlim(0,100),plt.ylim(0,100)
