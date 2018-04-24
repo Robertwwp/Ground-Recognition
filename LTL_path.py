@@ -56,7 +56,7 @@ for i in range(100):
 parser = ltl2ba.Parser()
 #f = '[]<> g1 && []<> g2 && [] !obs'
 #f = '[](<> (s && <> (g1 && <> (g2 && <> g3)))) && [] !obs && s U g3'
-f = '[]<> s && <> g1 && <> g2 && <> g3 && [] !obs '
+f = '[]<> s && <> (g1 && <> (g2 && <> g3)) && [] !obs '
 out = ltl2ba.call_ltl2ba(f)
 print(out)
 symbols, g, initial, accepting = parser.parse(out)
@@ -121,7 +121,8 @@ for m in range(T):
             print('no more goals')
             flag_g=1
         else:
-            px,py=next_move((int(rx),int(ry)),Goal,grid)
+            px,py,plength=next_move((int(rx),int(ry)),Goal,grid)
+            if plength<=5: flag_g=1 #no self loop goal
             #plt.plot(px,py)
             flag=1
     else:
@@ -146,7 +147,8 @@ for m in range(T):
                     else:
                         print('state change')
                         print(cur_state)
-                        px,py=next_move((int(rx),int(ry)),Goal,grid)
+                        px,py,plength=next_move((int(rx),int(ry)),Goal,grid)
+                        if plength<=5: flag_g=1 #no self loop goal
                         break
                         #plt.plot(px,py)
 
