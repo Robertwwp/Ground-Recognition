@@ -27,7 +27,8 @@ for p in [
         patches.Rectangle(GoalM1[0],GoalM1[1],GoalM1[2],facecolor="green"),
         patches.Rectangle(GoalM2[0],GoalM2[1],GoalM2[2],facecolor="green"),
         patches.Rectangle((obsM1[0][0]+safe_rng,obsM1[0][1]+safe_rng),obsM1[1]-2*safe_rng,obsM1[2]-2*safe_rng,facecolor="black"),
-        patches.Rectangle(obsM1[0],obsM1[1],obsM1[2],facecolor="black",alpha=0.1)
+        #patches.Rectangle(obsM1[0],obsM1[1],obsM1[2],facecolor="black",alpha=0.1)
+        Polygon([(0,35),(0,100),(100,100),(100,30),(80,60),(40,65),(0,25)])
     ]:
 
     axis.add_patch(p)
