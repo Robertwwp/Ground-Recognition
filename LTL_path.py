@@ -18,15 +18,16 @@ plt.xlim(0,100),plt.ylim(0,100)
 #plt.scatter([1,1],[1,2])
 axis=plt.gca()
 
-box_size=6
+box_size,safe_rng=6,5
 StartM,GoalM1,GoalM2,obsM1=[(0,0),box_size,box_size],[(68,68),box_size,box_size],\
-                           [(78,38),box_size,box_size],[(20,20),20,40]
-GMset,Gset_full=[GoalM1,GoalM2],['g1','g2']
+                                  [(78,38),box_size,box_size],[(20,20),20,40]
+GMset,Gset_full,obs_full=[StartM,GoalM1,GoalM2],['s','g1','g2'],['s','g1','g2','obs']
 for p in [
         patches.Rectangle(StartM[0],StartM[1],StartM[2],facecolor="red"),
         patches.Rectangle(GoalM1[0],GoalM1[1],GoalM1[2],facecolor="green"),
         patches.Rectangle(GoalM2[0],GoalM2[1],GoalM2[2],facecolor="green"),
-        patches.Rectangle(obsM1[0],obsM1[1],obsM1[2],facecolor="black")
+        patches.Rectangle((obsM1[0][0]+safe_rng,obsM1[0][1]+safe_rng),obsM1[1]-2*safe_rng,obsM1[2]-2*safe_rng,facecolor="black"),
+        patches.Rectangle(obsM1[0],obsM1[1],obsM1[2],facecolor="black",alpha=0.1)
     ]:
 
     axis.add_patch(p)
@@ -41,18 +42,34 @@ for i in range(box_size):
         grid[GoalM1[0][0]+i][GoalM1[0][1]+j]='Goal1'
         grid[GoalM2[0][0]+i][GoalM2[0][1]+j]='Goal2'
 
+############################################################################
+#ltl constraints
+parser = ltl2ba.Parser()
+#f = '[]<> g1 && []<> g2 && [] !obs'
+f = '[]<> s && <> (g1 && <> g2) && [] !obs'
+out = ltl2ba.call_ltl2ba(f)
+print(out)
+symbols, g, initial, accepting = parser.parse(out)
+states=g.nodes()
+
+
+'''get observations and check state change'''
+'''modify A* heuristic'''
+
 #check observations
 def check_obsv(x,y):
 
-    obs,g1,g2=0,0,0
+    obs,g1,g2,s=0,0,0,0
     if obsM1[0][0]<=x<=obsM1[0][0]+obsM1[1] and obsM1[0][1]<=y<=obsM1[0][1]+obsM1[2]:
         obs=1
     if GoalM1[0][0]<=x<=GoalM1[0][0]+GoalM1[1] and GoalM1[0][1]<=y<=GoalM1[0][1]+GoalM1[2]:
         g1=1
     if GoalM2[0][0]<=x<=GoalM2[0][0]+GoalM2[1] and GoalM2[0][1]<=y<=GoalM2[0][1]+GoalM2[2]:
         g2=1
+    if StartM[0][0]<=x<=StartM[0][0]+StartM[1] and StartM[0][1]<=y<=StartM[0][1]+StartM[2]:
+        s=1
 
-    return obs,g1,g2
+    return obs,g1,g2,s
 
 def check_goals(state):
 
@@ -68,40 +85,27 @@ def check_goals(state):
 
     return Gset
 
-
-
-#ltl constraints
-parser = ltl2ba.Parser()
-f = '[]<> g1 && []<> g2 && [] !obs'
-out = ltl2ba.call_ltl2ba(f)
-print(out)
-symbols, g, initial, accepting = parser.parse(out)
-states=g.nodes()
-
-
-'''get observations and check state change'''
-'''modify A* heuristic'''
-
 #A* searching
 #################################################
 #velocity m/s, sampling time, scale on map
-v,t,scale=0.5,0.2,10
+v,t,scale=0.5,0.4,10
 
 #start,Goal=[0,0],[70,70]
 #px,py=next_move(start,Goal,grid)
 rx,ry,pose,m,flag=2,2,0,0,0  #pose is the head dir wrt x axis
-T,cur_state=100,'T0_init'   #simulation ticks, time=T*t
+T,cur_state=140,'T0_init'   #simulation ticks, time=T*t
 for m in range(T):
-    obs,g1,g2=check_obsv(rx,ry)
+    obs,g1,g2,s=check_obsv(rx,ry)
     #first step
     if flag==0:
         Gset=check_goals(cur_state)
         distance,Goal=0,None
         for i in range(len(Gset)):
             xG,yG=Gset[i][0][0],Gset[i][0][1]
-            if abs(xG-rx)+abs(yG-ry)>distance:
-                distance=abs(xG-rx)+abs(yG-ry)
+            if np.sqrt(abs(xG-rx)**2+abs(yG-ry)**2)>distance:
+                distance=np.sqrt(abs(xG-rx)**2+abs(yG-ry)**2)
                 Goal=Gset[i][0]
+                Goal=(Goal[0]+box_size/2,Goal[1]+box_size/2)
         if Goal==None:
             print('no more goals')
             break
@@ -120,9 +124,10 @@ for m in range(T):
                     distance,Goal=0,None
                     for i in range(len(Gset)):
                         xG,yG=Gset[i][0][0],Gset[i][0][1]
-                        if abs(xG-rx)+abs(yG-ry)>distance:
-                            distance=abs(xG-rx)+abs(yG-ry)
+                        if np.sqrt(abs(xG-rx)**2+abs(yG-ry)**2)>distance:
+                            distance=np.sqrt(abs(xG-rx)**2+abs(yG-ry)**2)
                             Goal=Gset[i][0]
+                            Goal=(Goal[0]+box_size/2,Goal[1]+box_size/2)
                     if Goal==None:
                         print('no more goals')
                         break
@@ -130,13 +135,14 @@ for m in range(T):
                         print('state change')
                         print(cur_state)
                         px,py=next_move((int(rx),int(ry)),Goal,grid)
+                        break
                         #plt.plot(px,py)
 
     #get trajectory based on kinematics
     for n in range(45):
         theta=((n*2+(-45))/180.0)*np.pi
         rx_,ry_=rx+scale*t*v*np.cos(pose+theta),ry+scale*t*v*np.sin(pose+theta)
-        cost_=np.min(abs(rx_-px)+abs(ry_-py))+abs(rx_-Goal[0])+abs(ry_-Goal[1])
+        cost_=np.min(np.sqrt(abs(rx_-px)**2+abs(ry_-py)**2))+np.sqrt(abs(rx_-Goal[0])**2+abs(ry_-Goal[1])**2)
         if n==0: cost=cost_
         else: cost=np.append(cost,cost_)
 
