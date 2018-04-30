@@ -1,9 +1,4 @@
-'''
-A* search based on neighbors
-probalistic map
-map def based on image
-'''
-'''ltl2ba on the path, tulip interface used'''
+'''LTL Constrained A* Planning for Mapping an Indoor Environment'''
 
 from tulip.interfaces import ltl2ba
 from matplotlib import pyplot as plt
@@ -13,50 +8,48 @@ from descartes import PolygonPatch
 from Astar import next_move
 import networkx as nx
 import numpy as np
+import random
 
-#Define the map and get grid map for A*
+#define and draw the map
+#further work needed to transfer the ground recognition result to the map here
 plt.xlim(0,100),plt.ylim(0,100)
 #plt.scatter([1,1],[1,2])
 axis=plt.gca()
 
-box_size,safe_rng=6,5
-poly=Polygon([(0,35),(0,100),(100,100),(100,30),(80,60),(40,65),(0,25)])
+box_size,safe_rng=6,3 #size of the start and goal region; the safe range for obstacles
+poly=Polygon([(0,35),(0,100),(100,100),(100,30),(80,60),(40,65),(0,25)]) #non-ground area
 
 StartM,GoalM1,GoalM2,GoalM3,obsM1=[(47,0),box_size,box_size],[(10,20),box_size,box_size],\
-                                  [(47,47),box_size,box_size],[(84,20),box_size,box_size],[(20,20),20,40]
+                                  [(47,47),box_size,box_size],[(84,20),box_size,box_size],[(30,15),10,10]
 GMset,Gset_full,obs_full=[StartM,GoalM1,GoalM2,GoalM3],['s','g1','g2','g3'],['s','g1','g2','g3','obs']
 for p in [
         patches.Rectangle(StartM[0],StartM[1],StartM[2],facecolor="red"),
         patches.Rectangle(GoalM1[0],GoalM1[1],GoalM1[2],facecolor="green"),
         patches.Rectangle(GoalM2[0],GoalM2[1],GoalM2[2],facecolor="green"),
         patches.Rectangle(GoalM3[0],GoalM3[1],GoalM3[2],facecolor="green"),
-        #patches.Rectangle((obsM1[0][0]+safe_rng,obsM1[0][1]+safe_rng),obsM1[1]-2*safe_rng,obsM1[2]-2*safe_rng,facecolor="black"),
-        #patches.Rectangle(obsM1[0],obsM1[1],obsM1[2],facecolor="black",alpha=0.1)
+        patches.Rectangle((obsM1[0][0]+safe_rng,obsM1[0][1]+safe_rng),obsM1[1]-2*safe_rng,obsM1[2]-2*safe_rng,facecolor="black"),
+        patches.Rectangle(obsM1[0],obsM1[1],obsM1[2],facecolor="black",alpha=0.1),
         PolygonPatch(poly)
     ]:
 
     axis.add_patch(p)
 
+#get the grid map for A*, label all the un-passible areas
 grid=[[None for _ in range(100)] for _ in range(100)]
-#for i in range(obsM1[1]):
-#    for j in range(obsM1[2]):
+for i in range(obsM1[1]):
+    for j in range(obsM1[2]):
+        grid[obsM1[0][0]+i][obsM1[0][1]+j]='%'
 for i in range(100):
     for j in range(100):
         if poly.contains(Point(i,j)):
             grid[i][j]='%'
-            #grid[obsM1[0][0]+i][obsM1[0][1]+j]='%'
-'''for i in range(box_size):
-    for j in range(box_size):
-        grid[StartM[0][0]+i][StartM[0][1]+j]='start'
-        grid[GoalM1[0][0]+i][GoalM1[0][1]+j]='Goal1'
-        grid[GoalM2[0][0]+i][GoalM2[0][1]+j]='Goal2'''
+
 
 ############################################################################
 #ltl constraints
 parser = ltl2ba.Parser()
-#f = '[]<> g1 && []<> g2 && [] !obs'
-#f = '[](<> (s && <> (g1 && <> (g2 && <> g3)))) && [] !obs && s U g3'
-f = '[]<> s && <> (g1 && <> (g2 && <> g3)) && [] !obs '
+f = '[]<> s && <> g1 && <> g2 && <> g3 && [] !obs'
+#f = '[]<> s && <> (g3 && <> (g1 && <> g2)) && [] !obs '
 out = ltl2ba.call_ltl2ba(f)
 print(out)
 symbols, g, initial, accepting = parser.parse(out)
@@ -98,14 +91,17 @@ def check_goals(state):
 
 #A* searching
 #################################################
-#velocity m/s, sampling time, scale on map
+#velocity m/s, sampling period, scale factor on map
 v,t,scale=0.5,0.3,10
 
-#start,Goal=[0,0],[70,70]
-#px,py=next_move(start,Goal,grid)
-rx,ry,pose,m,flag,flag_g=50,3,0,0,0,0  #pose is the head dir wrt x axis
-T,cur_state=200,states[0]   #simulation ticks, time=T*t
+#rx, ry indicates teh start position
+#pose is the head direction wrt x axis
+rx,ry,pose,m,flag,flag_g=50,3,0,0,0,0
+T,cur_state=200,states[0]   #simulation ticks, time=T*t; initialize the current state
+
 for m in range(T):
+
+    #check observations every iteration
     obs,g1,g2,g3,s=check_obsv(rx,ry)
     #first step
     if flag==0:
@@ -126,13 +122,14 @@ for m in range(T):
             #plt.plot(px,py)
             flag=1
     else:
-    #check state
         for neighbor in g.neighbors(cur_state):
             if neighbor!=cur_state:
                 trans=g[cur_state][neighbor][0]['guard']
+                #check transition, if state change, find new goal and new path
                 if eval(trans):
                     cur_state=neighbor
                     Gset=check_goals(cur_state)
+                    #find nearest goal
                     distance,Goal=np.inf,None
                     for i in range(len(Gset)):
                         xG,yG=Gset[i][0][0],Gset[i][0][1]
@@ -149,14 +146,17 @@ for m in range(T):
                         print(cur_state)
                         px,py,plength=next_move((int(rx),int(ry)),Goal,grid)
                         if plength<=5: flag_g=1 #no self loop goal
-                        break
                         #plt.plot(px,py)
+                        break
+
 
     if flag_g==0:
     #get trajectory based on kinematics
+        random.seed()
+        uncertainty=(random.uniform(0,2),random.uniform(0,2)) #uncertainty on x and y direction
         for n in range(45):
             theta=((n*2+(-45))/180.0)*np.pi
-            rx_,ry_=rx+scale*t*v*np.cos(pose+theta),ry+scale*t*v*np.sin(pose+theta)
+            rx_,ry_=rx+scale*t*v*np.cos(pose+theta)+uncertainty[0],ry+scale*t*v*np.sin(pose+theta)+uncertainty[1]
             cost_=np.min(np.sqrt(abs(rx_-px)**2+abs(ry_-py)**2))+np.sqrt(abs(rx_-Goal[0])**2+abs(ry_-Goal[1])**2)
             if n==0: cost=cost_
             else: cost=np.append(cost,cost_)
