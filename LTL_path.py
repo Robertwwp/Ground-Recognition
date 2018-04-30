@@ -89,7 +89,7 @@ def check_goals(state):
 
     return Gset
 
-#A* searching
+#actual path finding
 #################################################
 #velocity m/s, sampling period, scale factor on map
 v,t,scale=0.5,0.3,10
