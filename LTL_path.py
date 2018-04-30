@@ -98,6 +98,7 @@ v,t,scale=0.5,0.3,10
 #pose is the head direction wrt x axis
 rx,ry,pose,m,flag,flag_g=50,3,0,0,0,0
 T,cur_state=200,states[0]   #simulation ticks, time=T*t; initialize the current state
+#the initial state might not be state[0] for some automaton, try find the words 'init' in the future
 
 for m in range(T):
 
