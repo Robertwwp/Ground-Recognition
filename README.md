@@ -1,4 +1,4 @@
-# Project Ground Recognition and path planning
+# Project Ground Recognition and Path Planning
 
 'KDE.pkl': Position Kernel Density Model
 
