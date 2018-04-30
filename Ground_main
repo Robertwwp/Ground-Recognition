@@ -11,14 +11,14 @@ from sklearn import mixture
 
 np.set_printoptions(threshold=np.inf)
 
-'''more features and more testings (large ground area) with error messages'''
+step=8 #for gabor filters' size, should be multiple of 4
 
-step=8
-
-testimg=cv2.imread('pictures/test/362.jpg')
+#image preparations
+testimg=cv2.imread('pictures/test/145.jpg')
 testimg=cv2.resize(testimg,(640,480))
 b,g,r=cv2.split(testimg)
 h,w=480,640
+#image pixels' RGBXY feature
 X=np.zeros(shape=(h,w,5))
 for m in range(h):
     for n in range(w):
@@ -28,10 +28,11 @@ for m in range(h):
         X[m][n][3]=m/float(h)
         X[m][n][4]=n/float(w)
 
+#slic segment of the testimg
 segments_test=slic(testimg, n_segments=300, compactness=15, sigma=8)
-num_suppix_test=int(np.amax(segments_test))+1
+num_suppix_test=int(np.amax(segments_test))+1 #number of superpixels
 
-'''better filters'''
+#filters preapration, 2 differenct block sizes, 12 gabor filters
 filters = []
 ksize = step*2
 for theta in np.arange(0, np.pi, np.pi / 6):
@@ -44,6 +45,8 @@ for theta in np.arange(0, np.pi, np.pi / 6):
     kern /= 1.5*kern.sum()
     filters.append(kern)
 
+#function to prepare the feature vectors of the test image
+#outpt: feature vectors and f_X for KDE
 def testpre():
 
     h,w=testimg.shape[:2]
@@ -136,6 +139,7 @@ def testpre():
 
     return test,Pos
 
+#function to load the machine learning model and input the test feature vectors
 def ml(test):
 
     clf_cali = joblib.load('clf_cali.pkl')
@@ -144,6 +148,7 @@ def ml(test):
     print('ml complete')
     return Wascore
 
+#function to load the position kernel density estumation model and input the f_X from testpre()
 def KDE(f_X):
     f_X=f_X.reshape(num_suppix_test*4,2)
     print('f_X ready')
@@ -161,6 +166,7 @@ def KDE(f_X):
     print('KDE complete')
     return Wb_score
 
+#geometry cue of the testimg
 def Geo(testimg):
 
     gray = cv2.cvtColor(testimg,cv2.COLOR_BGR2GRAY)
@@ -276,6 +282,7 @@ def Geo(testimg):
     print('Geo complete')
     return Wc_score
 
+#function to draw the generic mask
 def drawmask_O(score,img):
     overlay=img.copy()
     img2=img.copy()
@@ -297,6 +304,7 @@ def drawmask_O(score,img):
 
     return listG,img2
 
+#function to draw other mask in general
 def drawmask(mask,img):
     overlay,img2=img.copy(),img.copy()
     list=[np.where(mask==1)]
@@ -305,12 +313,16 @@ def drawmask(mask,img):
     alpha=0.3
     cv2.addWeighted(overlay,alpha,img2,1-alpha,0,img2)
     cv2.imshow('img',img2)
+    cv2.imwrite('result2.jpg',img2)
     if cv2.waitKey(0) & 0xFF == ord('q'):
         cv2.destroyAllWindows()
 
     return None
 
-'''need better output'''
+#Gaussian Mixture model
+#Input: listG is the groud pixels' index in generic mask
+#       X is the RGBXY feature space defined at the beginning
+#       b,g,r are the color spaces of the textimg
 def GMM(listG,X,b,g,r):
 
     #start = time.clock()
@@ -325,26 +337,10 @@ def GMM(listG,X,b,g,r):
 
     gmm=mixture.GaussianMixture(n_components=5).fit(XG)
     gmmprob=gmm.score_samples(X_gmm).reshape(h,w)
-    '''for j in range(50):
-        pct1,pct2=np.percentile(gmmprob,2*j),np.percentile(gmmprob,2*j+2)
-        listP=np.where((gmmprob>=pct1) & (gmmprob<=pct2))
-        for p in range(len(listP[0])):
-            gmmprob[listP[0][p]][listP[1][p]]=j'''
-
-    '''mask = np.ones((h,w),np.uint8)*2
-    #mask = np.zeros(testimg.shape[:2],np.uint8)
-    list=np.where(gmmprob>=0.84)
-    for n in range(len(list[0])):
-        mask[list[0][n]][list[1][n]]=3
-    #scores=np.exp(gmm.score_samples(X))
-    #gmmprob=(scores/(max(scores)-min(scores))).reshape(h,w)
-
-    #elapsed = time.clock()
-    #elapsed = elapsed - start
-    #print("Time spent in GMM is: ", elapsed)'''
 
     return gmmprob
 
+#Implementation of Max-Flow MIn-Cut algorithm
 def Cut(gmmprob,X,k):
 
     g = mf.Graph[float]()
@@ -378,7 +374,7 @@ def Cut(gmmprob,X,k):
     structure[0,1],structure[1,0]=0,1
     g.add_grid_edges(nodeids, structure=structure, weights=weightsLR, symmetric=True)
 
-    g.add_grid_tedges(nodeids,gmmprob,1-gmmprob)
+    g.add_grid_tedges(nodeids,gmmprob,-gmmprob)
     g.maxflow()
     sgm=g.get_grid_segments(nodeids)
     mask=np.int_(np.logical_not(sgm))
@@ -386,36 +382,33 @@ def Cut(gmmprob,X,k):
 
     return mask,listG
 
+#the function to estimate depth, to be further developed
 #def depth():
 
 if __name__ == '__main__':
 
-    start = time.clock()
+    start = time.clock() #for computing speed checking
     test, f_X=testpre()
-    Wa,Wb,Wc=0.37,0.29,0.34
+    Wa,Wb,Wc=0.37,0.29,0.34 #the weight of the three scores
     Wa_score,Wb_score,Wc_score=ml(test),KDE(f_X),Geo(testimg)
-    score=Wa*Wa_score+Wb*Wb_score+Wc*Wc_score
+    score=Wa*Wa_score+Wb*Wb_score+Wc*Wc_score #score for the generic mask
     elapsed = time.clock()
     elapsed = elapsed - start
     print("Time spent in generic estimation is: ", elapsed)
-    listG,imgO=drawmask_O(score,testimg)
-    #np.savez('listG262.npz',listG=listG)
+    listG,imgO=drawmask_O(score,testimg) #get the generic mask and extract the ground pixels
 
     cv2.imshow('img',imgO)
     if cv2.waitKey(0) & 0xFF == ord('q'):
         cv2.destroyAllWindows()
 
-    '''with np.load('listG.npz') as data:
-        listG = data['listG']'''
-
     start = time.clock()
 
-    '''position continous!!!!'''
-    itera=3
+    itera=2 #iterations for running the GMM and cut algorithm
     for n in range(itera):
         gmmprob=GMM(listG,X,b,g,r)
-        #drawmask(np.remainder(mask,2),testimg)
         mask,listG=Cut(gmmprob,X,50)
+        #if cut failed, change criterion for gmm
+        #if keep failing, use the Grabcut algorithm in Opencv
         if len(listG[0])==0:
             print('failed to cut')
             listG=np.where(gmmprob>=np.percentile(gmmprob,90))
@@ -432,7 +425,6 @@ if __name__ == '__main__':
     elapsed = time.clock()
     elapsed = elapsed - start
     print("Time spent in grabcut is: ", elapsed)
-    #prob_MRF=MRF(prob,X)
-    '''need to change about possile BG and defi BG'''
-    #mask=np.where((mask==2)|(mask==0),0,1).astype('uint8')
+
+    #draw the final mask
     drawmask(mask,testimg)
