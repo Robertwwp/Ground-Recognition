@@ -11,3 +11,4 @@
 'LTL_path': LTL constrained A* planning
 
 
+Depth Estimation needed to be further developped to transfer the ground area in an image into the real world map
